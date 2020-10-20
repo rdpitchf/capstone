@@ -12,8 +12,8 @@ def generate_image(array):
     for a in range(LINES*PIXELS*2):
         array[a] = int.from_bytes(array[a], "big")
 
-    rgb565_1 = np.zeros([LINES*PIXELS,3], dtype=np.uint8)
-    rgb565_2 = np.zeros([LINES*PIXELS,3], dtype=np.uint8)
+    rgb565_1 = np.zeros([LINES*PIXELS,3], dtype=np.uint16)
+    rgb565_2 = np.zeros([LINES*PIXELS,3], dtype=np.uint16)
 
     for a in range(0,LINES*PIXELS*2,2):
         first_byte = array[a]
@@ -45,10 +45,6 @@ def generate_image(array):
         rgb565_1[int(a/2)]=r_888_1,g_888_1,b_888_1
         rgb565_2[int(a/2)]=r_888_2,g_888_2,b_888_2
 
-    # This might be sketchy. Need to figure out how to actually resize the array ************************************
-    a_1 = np.reshape(rgb565_1, (120,160,3))
-    a_2 = np.reshape(rgb565_2, (120,160,3))
-
     format_array_1 = []
     format_array_2 = []
     for a in range(PIXELS):
@@ -64,8 +60,8 @@ def generate_image(array):
     print(len(format_array_1[0]))
     print(len(format_array_1[0][0]))
 
-    rgb888array_1 = np.array(format_array_1, dtype=np.uint8)
-    rgb888array_2 = np.array(format_array_2, dtype=np.uint8)
+    rgb888array_1 = np.array(format_array_1, dtype=np.uint16)
+    rgb888array_2 = np.array(format_array_2, dtype=np.uint16)
     print("Shape = " + str(rgb888array_1.shape))
 
     # for a in range(PIXELS):
@@ -105,12 +101,11 @@ def generate_image(array):
 ser = serial.Serial('COM3', 115200)  # open serial port
 print("Running")
 
-LINES = 160
-PIXELS = 120
+LINES = 640
+PIXELS = 480
 array = []
 line = []
 
-ser.write(b'i')
 print("Starting loop")
 while True:
     a = 0
@@ -120,9 +115,11 @@ while True:
     for j in range(LINES):
         for i in range(PIXELS):
             array.append(ser.read(1))
-            a += 1
             array.append(ser.read(1))
-            a += 1
+            a += 2
+            # b = a%1000
+            # if(b == 0):
+            #     print(a)
 
     print("A = " + str(a))
     generate_image(array)

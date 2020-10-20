@@ -1,66 +1,53 @@
-#define ADDR 0x42
-#define REG_GAIN 0x00
-#define REG_BLUE 0x01
-#define REG_RED 0x02
-#define REG_COM1 0x04
-#define REG_VREF 0x03
-#define REG_COM4 0x0d
-#define REG_COM5 0x0e
-#define REG_COM6 0x0f
-#define REG_AECH 0x10
-#define REG_CLKRC 0x11
-#define REG_COM7 0x12
-#define COM7_RGB 0x04
-#define REG_COM8 0x13
-#define COM8_FASTAEC 0x80    // Enable fast AGC/AEC
-#define COM8_AECSTEP 0x40    // Unlimited AEC step size
-#define COM8_BFILT 0x20    // Band filter enable
-#define COM8_AGC 0x04    // Auto gain enable
-#define COM8_AWB 0x02    // White balance enable
-#define COM8_AEC 0x0
-#define REG_COM9 0x14
-#define REG_COM10 0x15
-#define REG_COM14 0x3E
-#define REG_SCALING_DCWCTR 0x72
-#define REG_SCALING_PCLK_DIV 0x73
-#define REG_COM11 0x3B
-#define COM11_NIGHT 0x80
-#define COM11_NMFR 0x60
-#define COM11_HZAUTO 0x10
-#define COM11_50HZ 0x08
-#define COM11_EXP 0x0
-#define REG_TSLB 0x3A
-#define REG_RGB444 0x8C
-#define REG_COM15 0x40
-#define COM15_RGB565 0x10
-#define COM15_R00FF 0xc0
-#define REG_HSTART 0x17
-#define REG_HSTOP 0x18
-#define REG_HREF 0x32
-#define REG_VSTART 0x19
-#define REG_VSTOP 0x1A
-#define REG_COM3 0x0C
-#define REG_MVFP 0x1E
-#define REG_COM13 0x3d
-#define COM13_UVSAT 0x40
-#define SCALING_DCWCTR 0x72
-#define SCALING_PCLK_DIV 0x73
-#define REG_BD50MAX 0xa5
-#define REG_BD60MAX 0xab
-#define REG_AEW 0x24
-#define REG_AEB 0x25
-#define REG_VPT 0x26
-#define REG_HAECC1 0x9f
-#define REG_HAECC2 0xa0
-#define REG_HAECC3 0xa6
-#define REG_HAECC4 0xa7
-#define REG_HAECC5 0xa8
-#define REG_HAECC6 0xa9
-#define REG_HAECC7 0xaa
-#define REG_COM12 0x3c
-#define REG_GFIX 0x69
-#define REG_COM16 0x41
-#define COM16_AWBGAIN 0x08
-#define REG_EDGE 0x3f
-#define REG_REG76 0x76
-#define ADCCTR0 0x20
+
+// ***************** Frame Rate Adjustment for 24MHz input clock *****************
+// 15 FPS, PCLK = 12 MHz.
+#define CLKRC 0x11
+#define DBLV 0x6B
+#define EXHCH 0x2A
+#define EXHCL 0x2B
+#define DM_LNL 0x92
+#define DM_LNH 0x93
+// COM11 DUPLICATE DEFINE:
+#define COM11 0x3B
+
+// ***************** Light banding *****************
+// 15 Fps for 60Hz light frequency (24MHz Input Clock)
+// COM8 DUPLICATE DEFINE:
+#define COM8 0x13
+#define BD50ST 0x9D
+#define BD60ST 0x9E
+#define BD50MAX 0xA5
+#define BD60MAX 0xAB
+// COM11 DUPLICATE DEFINE:
+// #define COM11 0x3B
+
+// ***************** Simple White Balance *****************
+// COM8 DUPLICATE DEFINE:
+// #define COM8 0x13
+#define AWBCTR0 0x6F
+
+// ***************** Light Mode *****************
+// COM8 DUPLICATE DEFINE:
+// #define COM8 0x13
+#define BLUE 0x01
+#define RED 0x02
+
+// ***************** Colour Saturation *****************
+#define MTX1 0x4F
+#define MTX2 0x50
+#define MTX3 0x51
+#define MTX4 0x52
+#define MTX5 0x53
+#define MTX6 0x54
+#define MTXS 0x58
+
+// ***************** Brightness *****************
+#define BRIGHT 0x55
+
+// ***************** Contrast *****************
+#define CONTRAS 0x56
+
+// ***************** Special Effects *****************
+#define TSLB 0x3A
+#define MANU 0x67
+#define MANV 0x68

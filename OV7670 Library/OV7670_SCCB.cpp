@@ -36,9 +36,11 @@ class OV7670_SCCB{
     }
 
     static bool write_until_true(uint8_t subaddress, uint8_t data){
-      while(read(subaddress) != data){
-        write_3_phase(subaddress, data);
-      }
+      // printf("ADDRESS: %x, DATA: %x\r\n", subaddress, data);
+      // while(read(subaddress) != data){
+      //   write_3_phase(subaddress, data);
+      // }
+      while(!write_3_phase(subaddress, data)){}
       return true;
     }
     static bool write_3_phase(uint8_t subaddress, uint8_t data){
