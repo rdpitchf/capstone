@@ -13,6 +13,7 @@ Programming code related to Engineering 4th Year Design Capstone Project. Using 
 - AL422_FIFO.cpp has not been verified whether it is working or not.
 - CAMERA.cpp is not setting the right register settings with OV7670_SCCB.cpp
 - serial_interface.py could be saving the image incorrectly or converting from rgb565 to rgb888 incorrectly.
+- The wires are also sensitive when bumped. Probably need to solder on wires to maintain a solid connection or get better wires.
 ## Comments:
 - When the lid is added on the camera, sometimes the camera picture looks pretty much all the same colour. However, nearly all of the time the picture contains the lines/curve/textures. This leads me to believe that the AL422_FIFO.cpp is working correctly. This might just be a data conversion issue within serial_interface.py.
 - Baud rate of serial_interface.py cannot exceed 115200 otherwise, python is too slow and cannot read all of the data fast enough.
