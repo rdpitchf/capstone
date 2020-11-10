@@ -1,0 +1,6 @@
+mbed-os/connectivity/
+mbed-os/drivers/device_key/
+mbed-os/features/
+mbed-os/storage/kvstore/
+mbed-os/storage/platform/
+mbed-os/platform/mbed-trace/
