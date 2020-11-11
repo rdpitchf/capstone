@@ -47,6 +47,14 @@ typedef enum{
     WAIT_LISTEN_ON_CHANNEL,
 }request_states_t;
 
+RadioFlags_t radioFlags = {
+    .rxDone = false,
+    .rxError = false,
+    .txDone = false,
+    .rxTimeout = false,
+    .txTimeout = false,
+};
+
 // Define packet sizes.
 #define REQUEST_PACKET_SIZE 5
 #define REQUEST_GRANT_PACKET_SIZE 4
@@ -75,6 +83,7 @@ int16_t request_grant_rx_rssi = 0;
 int8_t request_grant_rx_snr = 0;
 volatile request_states_t request_state = INIT;
 volatile request_states_t data_state = INIT;
+
 // ************** For Trail Camera **************
 
 
@@ -101,18 +110,84 @@ volatile request_states_t central_hub_request_state = INIT;
 
 #define DATA_PACKET_SIZE 255
 
-uint8_t frame_vga[VGA_DATA_SIZE] {0};
-uint8_t frame_qvga[QVGA_DATA_SIZE] {0};
-uint8_t frame_qqvga[QQVGA_DATA_SIZE] {0};
+// uint8_t frame_vga[VGA_DATA_SIZE] {0};
+// uint8_t frame_qvga[QVGA_DATA_SIZE] {0};
+uint8_t frame_qqvga[1] {0};
+
+#define DATA_TX_SUCCESS 0x00
+#define DATA_TX_ERROR_1 0x01
+#define DATA_TX_ERROR_2 0x02
+#define DATA_TX_ERROR_3 0x03
+#define DATA_TX_ERROR_4 0x04
+#define DATA_TX_ERROR_5 0x05
+
+#define DATA_RX_SUCCESS 0x00
+#define DATA_RX_ERROR_1 0x01
+#define DATA_RX_ERROR_2 0x02
+#define DATA_RX_ERROR_3 0x03
+#define DATA_RX_ERROR_4 0x04
+#define DATA_RX_ERROR_5 0x05
+
+#define DATA_ACK_PACKET_SIZE 3
+
+#define DATA_STATUS_SUCCESS 0
+#define DATA_STATUS_TIMEOUT_ERROR 1
+
+uint8_t data_tx_packet[DATA_PACKET_SIZE] {0};
+uint8_t trail_camera_data_rx_packet[DATA_ACK_PACKET_SIZE] {0};
+uint8_t central_hub_data_rx_packet[DATA_PACKET_SIZE] {0};
+
+// Set to the max size
+static uint8_t central_hub_rx_data[VGA_DATA_SIZE] = {0};
+uint16_t central_hub_rx_data_size = 0;
+
+uint8_t data_ack_tx_packet[DATA_ACK_PACKET_SIZE] {0};
+
+#define DATA_RETRY_MAX 3
+#define DATA_FULL 1
+#define DATA_HALF_FULL 2
+#define DATA_EMPTY 3
+#define DATA_RX_FAILED_TIMEOUT 1
+#define DATA_TRANSFER_SUCCESSFUL 2
+
+#define DATA_ACK_TIMEOUT 0
+#define DATA_ACK_ERROR 1
+#define DATA_ACK_SUCCESS 2
+#define DATA_SUCCESS 3
 
 
-RadioFlags_t radioFlags = {
-    .rxDone = false,
-    .rxError = false,
-    .txDone = false,
-    .rxTimeout = false,
-    .txTimeout = false,
-};
+volatile request_states_t central_hub_data_state = INIT;
+
+uint16_t rx_data_size = 0;
+uint8_t rx_data_data = 0;
+uint8_t rx_data_status = 0;
+
+radio_modems_t modem;
+uint32_t rx_bandwidth;
+uint32_t tx_bandwidth;
+uint32_t rx_datarate;
+uint32_t tx_datarate;
+uint8_t rx_coderate;
+uint8_t tx_coderate;
+uint16_t rx_preamble_len;
+uint16_t tx_preamble_len;
+bool rx_fix_len;
+bool tx_fix_len;
+bool rx_crc_on;
+bool tx_crc_on;
+bool rx_freq_hop_on;
+bool tx_freq_hop_on;
+bool rx_iq_inverted;
+bool tx_iq_inverted;
+uint32_t rx_bandwidth_afc;
+uint16_t rx_symb_timeout;
+uint8_t rx_payload_len;
+uint8_t rx_hop_period;
+bool rx_rx_continuous;
+int8_t tx_power;
+uint8_t tx_hop_period;
+uint32_t tx_timeout_val;
+uint32_t tx_fdev;
 
 void set_rx_settings_lora(uint32_t bandwidth, uint32_t datarate, uint8_t coderate, uint32_t bandwidth_afc, uint16_t preamble_len, uint16_t symb_timeout, bool fix_len, uint8_t payload_len, bool crc_on, bool freq_hop_on, uint8_t hop_period, bool iq_inverted, bool rx_continuous);
 void set_tx_settings_lora(int8_t power, uint32_t fdev, uint32_t bandwidth, uint32_t datarate, uint8_t coderate, uint16_t preamble_len, bool fix_len, bool crc_on, bool freq_hop_on, uint8_t hop_period, bool iq_inverted, uint32_t timeout);
@@ -124,9 +199,9 @@ uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint
 uint8_t send_battery_status(uint8_t battery_enable, uint8_t battery_status);
 uint8_t send_data(uint8_t battery_enable, uint8_t battery_status, uint32_t size,  uint8_t *data_input);
 void calibrate_radio();
-uint8_t central_hub_request_data(uint8_t timeout_seconds);
+uint8_t central_hub_request_data(uint8_t timeout_seconds, uint8_t *data_output);
 uint8_t trail_camera_transmit_data(uint8_t transmit_interval, uint32_t size, uint8_t *data_input);
-uint8_t central_hub_recevie_data(uint16_t device_id, uint8_t data_size);
+uint8_t central_hub_recevie_data(uint16_t device_id, uint16_t data_size, uint8_t *data_output);
 
 uint8_t send_battery_status(uint8_t battery_enable, uint8_t battery_status){
   return send_request_packet(battery_enable, battery_status, 0, NULL);
@@ -319,7 +394,7 @@ uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint
   }
   return send_request_status;
 }
-uint8_t central_hub_request_data(uint8_t timeout_seconds){
+uint8_t central_hub_request_data(uint8_t timeout_seconds, uint8_t *data_output){
 
   uint8_t send_request_grant_status = 0x0;
   bool exit = false;
@@ -416,7 +491,7 @@ uint8_t central_hub_request_data(uint8_t timeout_seconds){
           radioFlags.txDone = false;
           if(trail_camera_battery_enable == 0){
             // Start receiving data from the trail camera.
-            central_hub_recevie_data(trail_camera_id, data_size);
+            rx_data_status = central_hub_recevie_data(trail_camera_id, data_size, data_output);
           }
           // Exit with success.
           send_request_grant_status = REQUEST_GRANT_SUCCESS_CODE;
@@ -449,61 +524,72 @@ uint8_t trail_camera_transmit_data(uint8_t transmit_interval, uint32_t size, uin
   uint32_t bytes_left = size;
   uint8_t interval_counter = 0;
   uint32_t index = 0;
+  bool exit = false;
+  bool send_data_complete = false;
 
+  uint8_t retry_counter = 0;
+  uint16_t trail_camera_id = 0;
   data_state = SEND_PACKET;
 
   while(1){
     switch(data_state){
       case SEND_PACKET:{
           if(interval_counter++ < transmit_interval){
+            // ******* SEND PACKET *******
+
             // Set buffer size in radio.
             radio.set_max_payload_length(modem, DATA_PACKET_SIZE);
             // Send Device ID:
-            request_tx_packet[0] = (radio_id >> 8);
-            request_tx_packet[1] = (radio_id & 0x00FF);
+            data_tx_packet[0] = (radio_id >> 8);
+            data_tx_packet[1] = (radio_id & 0x00FF);
 
             // Copy over elements from data_input into transmit buffer:
             if((index + DATA_PACKET_SIZE-2) < size){
               for(uint8_t i = 0; i < DATA_PACKET_SIZE-3; i++){
-                request_tx_packet[i+3] = data_input[index + i];
+                data_tx_packet[i+3] = data_input[index + i];
               }
               // Valid packet.
-              request_tx_packet[2] = 1;
+              data_tx_packet[2] = 0;
             }else if(index >= size){
+              send_data_complete = true;
               // Set unused values to 0xFF
               for(uint8_t i = 0; i < DATA_PACKET_SIZE-3; i++){
-                request_tx_packet[i+3] = 0xFF;
+                data_tx_packet[i+3] = 0xFF;
               }
               // Invalid packet.
-              request_tx_packet[2] = 0;
+              data_tx_packet[2] = 1;
             }else{
+              send_data_complete = true;
+              // Have packet full of data.
               for(uint8_t i = 0; i < (index - size); i++){
-                request_tx_packet[i+3] = data_input[index + i];
+                data_tx_packet[i+3] = data_input[index + i];
               }
               // Set unused values to 0xFF
               for(uint8_t i = (index - size); i < DATA_PACKET_SIZE-3; i++){
-                request_tx_packet[i+3] = 0xFF;
+                data_tx_packet[i+3] = 0xFF;
               }
               // Valid packet.
-              request_tx_packet[2] = 1;
+              data_tx_packet[2] = 2;
             }
             index += DATA_PACKET_SIZE-3;
             bytes_left -= DATA_PACKET_SIZE-3;
 
-
             // Send packet over the radio.
-            radio.send(request_tx_packet, REQUEST_PACKET_SIZE);
+            radio.send(data_tx_packet, REQUEST_PACKET_SIZE);
             // Wait for radio response.
             data_state = WAIT_SEND_DONE;
           }else{
+            // ******* READ PACKET *******
             // Listen for acknowledgement packet.
-            data_state = RECEIVE_PACKET
+            data_state = RECEIVE_PACKET;
           }
         break;
       }
       case RECEIVE_PACKET:{
         //
         radio.set_rx_timeout_us(1000000);
+        // Set buffer size in radio.
+        radio.set_max_payload_length(modem, DATA_ACK_PACKET_SIZE);
         // Receive packet over the radio
         radio.receive();
         // Wait for radio response.
@@ -514,15 +600,52 @@ uint8_t trail_camera_transmit_data(uint8_t transmit_interval, uint32_t size, uin
         if(radioFlags.rxDone == true){
           // Reset flag.
           radioFlags.rxDone = false;
+          // Process received packet.
+
+          trail_camera_id = (trail_camera_data_rx_packet[0] << 8) | trail_camera_data_rx_packet[1];
+          if(trail_camera_id != radio_id){
+            return DATA_RX_ERROR_4;
+          }
+
+          switch(trail_camera_data_rx_packet[2]){
+            // Resend burst.
+            case DATA_ACK_TIMEOUT:{}
+            case DATA_ACK_ERROR:{
+              // Reset counters.
+              if(retry_counter++ < DATA_RETRY_MAX){
+                interval_counter = 0;
+                index -= DATA_PACKET_SIZE-3;
+                bytes_left += DATA_PACKET_SIZE-3;
+                data_state = SEND_PACKET;
+              }else{
+                return DATA_RX_ERROR_5;
+              }
+              break;
+            }
+            case DATA_ACK_SUCCESS:{
+              retry_counter = 0;
+              // Send next burst if there is more to send.
+              if(!send_data_complete){
+                interval_counter = 0;
+                data_state = SEND_PACKET;
+              }else{
+                return DATA_SUCCESS;
+              }
+              break;
+            }
+          }
 
         }else if(radioFlags.rxTimeout == true){
           // Reset flag.
           radioFlags.rxTimeout = false;
+          // Did not receive acknowledgement. Link Terminated. (Do not send potentially duplicate data)
+          return DATA_RX_ERROR_3;
 
         }else if(radioFlags.rxError == true){
           // Reset flag.
           radioFlags.rxError = false;
-          
+          // Link Terminated. (Do not send potentially duplicate data)
+          return DATA_RX_ERROR_2;
         }
         break;
       }
@@ -538,18 +661,162 @@ uint8_t trail_camera_transmit_data(uint8_t transmit_interval, uint32_t size, uin
         else if(radioFlags.txTimeout){
           // Reset flag.
           radioFlags.txTimeout = false;
-          // TODO:
+          // Resend packet over the radio.
+          radio.send(data_tx_packet, REQUEST_PACKET_SIZE);
+          // Wait for radio response.
+          data_state = WAIT_SEND_DONE;
         }
         break;
       }
     }
   }
-  return REQUEST_SUCCESS_CODE;
+  return DATA_SUCCESS;
 }
-uint8_t central_hub_recevie_data(uint16_t device_id, uint8_t data_size){
-  printf("central_hub_recevie_data \r\n");
-  return REQUEST_SUCCESS_CODE;
+uint8_t central_hub_recevie_data(uint16_t device_id, uint16_t data_size, uint8_t *data_output){
+  printf("trail_camera_transmit_data \r\n");
+
+  uint32_t bytes_left = data_size;
+  uint8_t interval_counter = 0;
+  uint32_t index = 0;
+  bool exit = false;
+  bool receive_data_complete = false;
+
+  uint8_t retry_counter = 0;
+  central_hub_rx_data_size = data_size;
+  central_hub_data_state = RECEIVE_PACKET;
+  uint16_t trail_camera_id = 0;
+  uint8_t data_ack_status = 0;
+
+
+  if(data_size == 1){
+    central_hub_rx_data_size = VGA_DATA_SIZE;
+  }else if(data_size == 2){
+    central_hub_rx_data_size = QVGA_DATA_SIZE;
+  }else if(data_size == 3){
+    central_hub_rx_data_size = QQVGA_DATA_SIZE;
+  }
+
+  uint8_t transmit_interval = 0;
+  if(data_size == VGA_DATA_SIZE){
+    transmit_interval = 10;
+  }else if(data_size == QVGA_DATA_SIZE){
+    transmit_interval = 10;
+  }else if(data_size == QQVGA_DATA_SIZE){
+    transmit_interval = 10;
+  }
+
+  while(1){
+    switch(central_hub_data_state){
+      case SEND_PACKET:{
+        // Set buffer size in radio.
+        radio.set_max_payload_length(modem, DATA_ACK_PACKET_SIZE);
+        // Send Device ID:
+        data_ack_tx_packet[0] = (device_id >> 8);
+        data_ack_tx_packet[1] = (device_id & 0x00FF);
+        // Send Status:
+        data_ack_tx_packet[2] = data_ack_status;
+
+        // Send packet over the radio.
+        radio.send(data_ack_tx_packet, DATA_ACK_PACKET_SIZE);
+        // Wait for radio response.
+        central_hub_data_state = WAIT_SEND_DONE;
+
+        break;
+      }
+      case RECEIVE_PACKET:{
+        //
+        radio.set_rx_timeout_us(1000000);
+        // Set buffer size in radio.
+        radio.set_max_payload_length(modem, DATA_PACKET_SIZE);
+        // Receive packet over the radio
+        radio.receive();
+        // Wait for radio response.
+        request_state = WAIT_RECEIVE_DONE;
+        break;
+      }
+      case WAIT_RECEIVE_DONE:{
+        if(radioFlags.rxDone == true){
+          // Reset flag.
+          radioFlags.rxDone = false;
+
+          // Process received packet.
+          trail_camera_id = (central_hub_data_rx_packet[0] << 8) | central_hub_data_rx_packet[1];
+          if(trail_camera_id != device_id){
+            return DATA_RX_ERROR_4;
+          }
+
+          switch(central_hub_data_rx_packet[2]){
+            // Resend burst.
+            case DATA_FULL:{
+              for(uint8_t i = 3; i < DATA_PACKET_SIZE; i++){
+                data_output[index++] = central_hub_data_rx_packet[i];
+              }
+              break;
+            }
+            case DATA_HALF_FULL:{
+              // Reset counters.
+              for(uint8_t i = 3; i < (central_hub_rx_data_size - DATA_PACKET_SIZE) + 3; i++){
+                data_output[index++] = central_hub_data_rx_packet[i];
+              }
+              receive_data_complete = true;
+              break;
+            }
+            case DATA_EMPTY:{
+              receive_data_complete = true;
+              break;
+            }
+          }
+          if(interval_counter++ == transmit_interval){
+            // Send success ack
+            data_ack_status = DATA_STATUS_SUCCESS;
+            interval_counter = 0;
+            central_hub_data_state = SEND_PACKET;
+          }else{
+            // Recieve next packet.
+            central_hub_data_state = RECEIVE_PACKET;
+          }
+
+        }else if( (radioFlags.rxTimeout == true) || (radioFlags.rxError == true) ){
+          // Reset flag.
+          radioFlags.rxTimeout = false;
+          // Send timeout/error ack when it is suppose to be sent.
+          if(retry_counter++ < DATA_RETRY_MAX){
+            data_ack_status = DATA_STATUS_TIMEOUT_ERROR;
+            interval_counter = 0;
+            // index = index - (interval_counter*(DATA_PACKET_SIZE-3));
+            central_hub_data_state = SEND_PACKET;
+          }else{
+            return DATA_RX_FAILED_TIMEOUT;
+          }
+        }
+        break;
+      }
+      case WAIT_SEND_DONE:{
+        if(radioFlags.txDone){
+          // Reset flag.
+          radioFlags.txDone = false;
+          // Receive Again
+          if(!receive_data_complete){
+            central_hub_data_state = RECEIVE_PACKET;
+          }else{
+            return DATA_TRANSFER_SUCCESSFUL;
+          }
+        }
+        else if(radioFlags.txTimeout){
+          // Reset flag.
+          radioFlags.txTimeout = false;
+          // Resend packet over the radio.
+          radio.send(data_ack_tx_packet, DATA_ACK_PACKET_SIZE);
+          // Wait for radio response.
+          central_hub_data_state = WAIT_SEND_DONE;
+        }
+        break;
+      }
+    }
+  }
+  return DATA_SUCCESS;
 }
+
 
 void On_tx_done(void){
   printf("tx_done. \r\n");
@@ -584,6 +851,26 @@ void On_rx_done(const uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
       break;
     }
   }
+  switch(data_state){
+    case WAIT_RECEIVE_DONE:{
+      // Copy over data elements from Central Hub.
+      for(uint8_t i = 0; i < DATA_ACK_PACKET_SIZE; i++){
+        trail_camera_data_rx_packet[i] = payload[i];
+      }
+      break;
+    }
+  }
+  switch(central_hub_data_state){
+    case WAIT_RECEIVE_DONE:{
+      // Copy over data elements from Central Hub.
+      for(uint8_t i = 0; i < DATA_PACKET_SIZE; i++){
+        central_hub_data_rx_packet[i] = payload[i];
+      }
+      break;
+    }
+  }
+
+
 
 }
 void On_tx_timeout(void){
@@ -615,32 +902,7 @@ static radio_events_t radio_events = {
   .cad_done = &On_cad_done,
 };
 
-radio_modems_t modem;
-uint32_t rx_bandwidth;
-uint32_t tx_bandwidth;
-uint32_t rx_datarate;
-uint32_t tx_datarate;
-uint8_t rx_coderate;
-uint8_t tx_coderate;
-uint16_t rx_preamble_len;
-uint16_t tx_preamble_len;
-bool rx_fix_len;
-bool tx_fix_len;
-bool rx_crc_on;
-bool tx_crc_on;
-bool rx_freq_hop_on;
-bool tx_freq_hop_on;
-bool rx_iq_inverted;
-bool tx_iq_inverted;
-uint32_t rx_bandwidth_afc;
-uint16_t rx_symb_timeout;
-uint8_t rx_payload_len;
-uint8_t rx_hop_period;
-bool rx_rx_continuous;
-int8_t tx_power;
-uint8_t tx_hop_period;
-uint32_t tx_timeout_val;
-uint32_t tx_fdev;
+
 
 
 void set_rx_settings_lora(uint32_t bandwidth, uint32_t datarate, uint8_t coderate, uint32_t bandwidth_afc, uint16_t preamble_len, uint16_t symb_timeout, bool fix_len, uint8_t payload_len, bool crc_on, bool freq_hop_on, uint8_t hop_period, bool iq_inverted, bool rx_continuous){
@@ -770,7 +1032,7 @@ int main(void){
       case 'c':
         led2 = 1;
         if(!is_trail_camera){
-          uint8_t result2 = central_hub_request_data(15);
+          uint8_t result2 = central_hub_request_data(15, central_hub_rx_data);
           printf("central_hub_request_data result: %d \r\n", result2);
         }
         led2 = 0;
