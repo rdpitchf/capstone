@@ -1,0 +1,120 @@
+Steps:
+1. Follow the steps  according to this youtube video: https://www.youtube.com/watch?v=cM0dFoTuU14&list=PLiVCejcvpseuWWmJc9uELYww-xindjZCH&index=2
+	1.1 Python : www.python.org/downloads
+	1.2 Git : https://git-scm.com/download
+	1.3 Mercurial : https://www.mercurial-scm.org/ 
+	1.4 GCC : https://www.youtube.com/redirect?event=video_description&v=cM0dFoTuU14&q=https%3A%2F%2Flaunchpad.net%2Fgcc-arm-embedded%2F4.9%2F4.9-2015-q3-update&redir_token=QUFFLUhqbmxoUHR4MUdaX01IQW51dlZ5bGhmTzlDaUlBZ3xBQ3Jtc0tuSDhfREVyM19mU1ptT2lpZnJIR1VramFmZFJSOGh2dElBX2RpWVRkbUpYV0RpWktGUUtycWFucnhyR1hkNDFGMmJfRFJJZDdwWGM1UVJOTGczR0pyTHM4WjlpeXFtejNycHdJVm85Q2pGenNRc2tVUQ%3D%3D
+2. Check the versions of all of the software
+	2.1 arm-none-eabi-gcc --version
+	2.2 python --version
+	2.3 pip --version
+	2.4 git --version
+	2.5 hg --version
+3. Installing mbed-cli
+	3.1 pip install mbed-cli
+	3.2 mbed --version
+
+While running in virtualbox, go to devices->usb->STmicroelectronics STM32 Linker
+The linker might have to be installed on host machine or the virtual machine.
+
+Once mbed-cli is setup, you have to configure your settings to compile:
+set toolchain, target, etc
+
+To compile simple blinky:
+1. Check to make sure target is available by running 'mbed detect'
+2. mbed compile -NUCLEO_L4R5ZI -vv -t GCC_ARM
+
+I had also installed Microsoft Visual Studio, so that might need to be done if it is not working at this point.
+====> I have uninstalled microsoft visual studio and I can stil compile blinky so it is not needed.
+
+I need to convert the library from 'MBED OS 2' to 'MBED OS 5':
+https://os.mbed.com/docs/mbed-os/v5.14/tutorials/migrating-to-mbed-os-5.html
+
+I am using python3 however, it might require python2 for the older libraries.
+
+Once uninstalled python3 and installed python 2.7, I was able to download the libraries from the MBED OS 2 projects.
+However, my board does not have a target in this version.
+
+It is possible to download the targets for NUCLEO L4R5ZI from here https://os.mbed.com/users/mbed_official/code/mbed/
+
+NUCLEO L4R5ZI not found in the targets when importing project from 2.7. In order to resolve this:
+1. Copy the targets from Github\sx126x_ping_pong_example\ping_pong_example\mbed-os\targets\targets.json.(This is the mbed os 5 or 6 version)
+into python2_files\test2\SX126X_PingPong_Demo\.temp\tools\latest_targets.json
+	1.1 "MCU_STM32"
+	1.2 "MCU_STM32L4"
+	1.3 "NUCLEO_L4R5ZI"
+	1.4 More information at: https://os.mbed.com/docs/mbed-os/v5.12/reference/adding-and-configuring-targets.html
+
+2. After adding in the targets we get a compiler error. The compiler version is too high. Need to try to change the version.
+	2.1 Compiler version mismatch: Have 9.3.1; expected version >= 6.0.0 and < 7.0.0
+	2.2 Downloading 6.3.1 compiler from here:
+
+3. There is another issue regarding the new targets added:
+	3.1 File "C:\CAPSTONE\python2_files\test2\SX126X_PingPong_Demo\.temp\tools\config\__init__.py", line 924, in get_target_config_data
+    		raise UndefinedParameter(name, tname, "target", "")
+		UndefinedParameter: Attempt to override undefined parameter 'deep-sleep-latency' in 'target:MCU_STM32'
+	3.2 Continue deleting all undefined parameters in the new targets added.
+
+4. After removing all errors regarding the new targets in the json files, the compiler cannot find mbed.h.
+	4.1 When downloading the most recent library 65be27845400, it does not contain all of the files. It also seems that python2 cannot download this properly.
+	It may require python3.
+	4.2
+
+
+Steps:
+1. Import mbed os 2 in online compiler.
+2. export online compiler project to make-gcc-arm.
+3. extract zip file.
+4. copy blinky main.cpp into folder.
+5. mbed deploy -> actually starts downloading 65be27845400->quits like half way through
+6. 
+
+When making a new project.
+
+
+
+
+
+In order to make a new project:
+0. Start in python3.
+1. Import mbed os 2 library in online compiler.
+2. Export online compiler project to make-gcc-arm.
+3. Extract zip file.
+4. Execute mbed deploy -> actually starts downloading 65be27845400->quits like half way through
+5. Stop mbed deploy after it has stopped downloading.
+6. Repeat execute mbed deploy
+7. There should be an error (when compiling) that says: if MBED_SDK_REV_MAP.has_key(build): AttributeError: 'dict' object has no attribute 'has_key'
+8. Uninstall python3. Install python2.7, pip and mbed-cli.
+9. Execute mbed detect will actually show the NUCLEO_L4R5ZI device.
+10. Add main.cpp from blinky.
+11. Compile project.
+12. Fix bugs and compile then flash to board.
+
+***** Also at some point, it is requried to copy over NUCLEO_L4R5ZI from target.json from online compiler into latest.json inside of .temp\tools that mbed deploy creates.
+
+
+In order to setup the Ping Pong Project:
+0. Everything is done with python2.7
+1. Copy 'typedef enum RadioCommands_e { ... }RadioCommands_t;' FROM sx126x.h INTO radio.h
+2. Compiler errors like 'sorry, unimplemented: non-trivial designated initializers not supported'
+	2.1 This means that you have to assign values to the typedefs in the same order that they are defined in.
+	This will have to be changed in a few places.
+	2.2 RadioCallbacks_t has rxSyncWordDone item but this must be commented out along with any other references to it. 
+	This is not used for anything in this code so it is safe to do so.
+
+
+
+
+In order to setup OV7670: Based off of https://os.mbed.com/users/edodm85/notebook/ov7670-camera-module/
+1. Download grabber.
+2. Install winrar.
+3. Extract package and run application. This might prompt you to install Microsoft .Net version 3.5
+
+
+
+4. Import test code.
+5. 
+
+
+
+
