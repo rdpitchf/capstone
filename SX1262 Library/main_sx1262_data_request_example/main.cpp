@@ -47,6 +47,11 @@ typedef enum{
     WAIT_LISTEN_ON_CHANNEL,
 }request_states_t;
 
+typedef enum{
+    SD_CARD,
+    CAMERA,
+}data_location_t;
+
 RadioFlags_t radioFlags = {
     .rxDone = false,
     .rxError = false,
@@ -65,11 +70,7 @@ RadioFlags_t radioFlags = {
 #define QVGA_DATA_SIZE 320*240*2
 #define QQVGA_DATA_SIZE 160*120*2
 // Radio identification number. (uint16_t)
-uint16_t radio_id = 0x10AF;
-// Define Data packet type:
-#define DATA_FULL 1
-#define DATA_HALF_FULL 2
-#define DATA_EMPTY 3
+static uint16_t radio_id = 0x10AF;
 // Retry limits:
 #define REQUEST_TX_RETRY_MAX 3
 #define REQUEST_RX_RETRY_MAX 3
@@ -81,113 +82,150 @@ uint16_t radio_id = 0x10AF;
 
 
 // ERROR and SUCCESS Codes:
-#define REQUEST_ERROR_1 0x1 // Error: Channel was already busy
-#define REQUEST_ERROR_2 0x2 // Error: Tx Timeout
-#define REQUEST_ERROR_3 0x3 // Error: Rx Timeout
-#define REQUEST_GRANT_ERROR_1 0x1 // Error: Rx timeout.
-#define REQUEST_GRANT_ERROR_2 0x2 // Error: Tx timeout.
+#define REQUEST_ERROR_1 0x01 // Error: Channel was already busy
+#define REQUEST_ERROR_2 0x02 // Error: Tx Timeout
+#define REQUEST_ERROR_3 0x03 // Error: Rx Timeout
+#define REQUEST_GRANT_ERROR_1 0x04 // Error: Rx timeout.
+#define REQUEST_GRANT_ERROR_2 0x05 // Error: Tx timeout.
 
-#define REQUEST_SUCCESS 0xF // Success: Successful request.
-#define REQUEST_GRANT_SUCCESS 0xF // Success: Tx Successful
+#define REQUEST_SUCCESS 0x06 // Success: Successful request.
+#define REQUEST_GRANT_SUCCESS 0x07 // Success: Tx Successful
 
-#define DATA_TX_SUCCESS 0x00
-#define DATA_RX_SUCCESS 0x00
-#define DATA_RX_ERROR_1 0x01
-#define DATA_RX_ERROR_2 0x02
-#define DATA_RX_ERROR_3 0x03
-#define DATA_RX_ERROR_4 0x04
-#define DATA_RX_ERROR_5 0x05
+#define DATA_TX_SUCCESS 0x08
+#define DATA_RX_SUCCESS 0x09
+#define DATA_RX_ERROR_1 0x0A
+#define DATA_RX_ERROR_2 0x0B
+#define DATA_RX_ERROR_3 0x0C
+#define DATA_RX_ERROR_4 0x0D
+#define DATA_RX_ERROR_5 0x0E
 
-#define DATA_STATUS_SUCCESS 0
-#define DATA_STATUS_TIMEOUT_ERROR 1
-#define DATA_RX_FAILED_TIMEOUT 1
-#define DATA_TRANSFER_SUCCESSFUL 2
-#define DATA_ACK_TIMEOUT 0
-#define DATA_ACK_ERROR 1
-#define DATA_ACK_SUCCESS 2
-#define DATA_SUCCESS 3
-
-
+#define DATA_STATUS_SUCCESS 0x15
+#define DATA_STATUS_TIMEOUT_ERROR 0x13
+#define DATA_RX_FAILED_TIMEOUT 0x11
+#define DATA_TRANSFER_SUCCESSFUL 0x12
+#define DATA_ACK_TIMEOUT 0x13
+#define DATA_ACK_ERROR 0x14
+#define DATA_ACK_SUCCESS 0x15
+#define DATA_SUCCESS 0x16
 
 
+#define TC_DATA_ACK_TIMEOUT_US 75000
+#define CH_DATA_TIMEOUT_US 75000
+#define WAIT_FOR_CH_TO_PROCESS_DATA_US 100000
+#define CH_WAIT_ON_PRINTS_US 100000
+
+// DATA_STATUS_SUCCESS
+// data_ack_status = DATA_STATUS_TIMEOUT_ERROR;
 
 // FYI: ch stands for central_hub and tc stands for trail_camera.
 volatile request_states_t tc_request_state = INIT;
 volatile request_states_t ch_request_state = INIT;
 volatile request_states_t tc_data_state = INIT;
 volatile request_states_t ch_data_state = INIT;
+volatile data_location_t data_location = CAMERA;
 
 // Request Packets.
-uint8_t tc_request_tx_packet[REQUEST_PACKET_SIZE] {0};
-uint8_t ch_request_rx_packet[REQUEST_PACKET_SIZE] {0};
+static uint8_t tc_request_tx_packet[REQUEST_PACKET_SIZE] {0};
+static uint8_t ch_request_rx_packet[REQUEST_PACKET_SIZE] {0};
 // Request Grant Packets.
-uint8_t tc_request_grant_rx_packet[REQUEST_GRANT_PACKET_SIZE] {0};
-uint8_t ch_request_grant_tx_packet[REQUEST_GRANT_PACKET_SIZE] {0};
+static uint8_t tc_request_grant_rx_packet[REQUEST_GRANT_PACKET_SIZE] {0};
+static uint8_t ch_request_grant_tx_packet[REQUEST_GRANT_PACKET_SIZE] {0};
 // Data Packets.
-uint8_t tc_data_tx_packet[DATA_PACKET_SIZE] {0};
-uint8_t ch_data_rx_packet[DATA_PACKET_SIZE] {0};
+static uint8_t tc_data_tx_packet[DATA_PACKET_SIZE] {0};
+static uint8_t ch_data_rx_packet[DATA_PACKET_SIZE] {0};
 // Data Acknowledgement Packets.
-uint8_t tc_data_ack_rx_packet[DATA_ACK_PACKET_SIZE] {0};
-uint8_t ch_data_ack_tx_packet[DATA_ACK_PACKET_SIZE] {0};
+static uint8_t tc_data_ack_rx_packet[DATA_ACK_PACKET_SIZE] {0};
+static uint8_t ch_data_ack_tx_packet[DATA_ACK_PACKET_SIZE] {0};
 // RSSI:
-int16_t tc_request_grant_rx_rssi = 0;
-int16_t ch_request_rx_rssi = 0;
+static int16_t tc_request_grant_rx_rssi = 0;
+static int16_t ch_request_rx_rssi = 0;
+static int8_t tc_data_ack_rx_rssi = 0;
+static int8_t ch_data_rx_rssi = 0;
 // SNR:
-int8_t tc_request_grant_rx_snr = 0;
-int8_t ch_request_rx_snr = 0;
-
-
-
+static int8_t tc_request_grant_rx_snr = 0;
+static int8_t ch_request_rx_snr = 0;
+static int8_t tc_data_ack_rx_snr = 0;
+static int8_t ch_data_rx_snr = 0;
 
 // Add in buffers in order to pass in pointers to add the data.
-// This will require functions like set_data() and print_data()/save_data()
+// This will require functions like get_data() and print_data()/save_data()
 // This method is used because we are limited to 640KB of SRAM
 // And one VGA picture is 614.4KB
-static uint8_t tc_tx_data_buffer[DATA_PACKET_SIZE-3] {0};
-static uint8_t ch_rx_data_buffer[DATA_PACKET_SIZE-3] {0};
+static uint8_t tc_tx_data_buffer_size = 0;
 
-// Set to the max size
-static uint8_t ch_rx_data[VGA_DATA_SIZE] {0};
-uint16_t ch_rx_data_size = 0;
+void tc_get_data_from_device(uint8_t max_size);
+void ch_print_data_to_cpu(uint8_t size_of_data);
+void tc_get_previous_data_from_device(uint8_t number_of_bytes_reset);
 
-// uint8_t frame_vga[VGA_DATA_SIZE] {0};
-// uint8_t frame_qvga[QVGA_DATA_SIZE] {0};
-uint8_t frame_qqvga[1] {0};
+uint32_t byte_counter = 0;
+uint32_t number_of_bytes_to_send = 600;
+void tc_get_data_from_device(uint8_t max_size){
 
-uint16_t rx_data_size = 0;
-uint8_t rx_data_data = 0;
+  // Do a full packet.
+  if(byte_counter + max_size < number_of_bytes_to_send){
+    tc_tx_data_buffer_size = max_size;
+    for(uint8_t i = 0; i < max_size; i++){
+      tc_data_tx_packet[i+3] = i;
+    }
+  // Send a half or empty packet.
+  }else{
+
+    if(byte_counter >= number_of_bytes_to_send){
+      tc_tx_data_buffer_size = 0;
+    }else{
+      tc_tx_data_buffer_size = number_of_bytes_to_send-byte_counter;
+      for(uint8_t i = 0; i < number_of_bytes_to_send-byte_counter; i++){
+        tc_data_tx_packet[i+3] = i;
+      }
+    }
+
+  }
+  byte_counter += max_size;
+
+}
+void ch_print_data_to_cpu(uint8_t size_of_data){
+  for(uint8_t i = 0; i < size_of_data; i++){
+    printf("%d,", ch_data_rx_packet[i+3]);
+  }
+  printf("\r\n");
+  // Add a delay so that the trail camera does not miss ack packet then timeout.
+  if(size_of_data < ((DATA_PACKET_SIZE-3)/2)){
+    wait_us(CH_WAIT_ON_PRINTS_US);
+  }
+}
+void tc_get_previous_data_from_device(uint8_t number_of_bytes_reset){
+
+}
+
 uint8_t rx_data_status = 0;
 
 
-
-
-
-radio_modems_t modem;
-uint32_t rx_bandwidth;
-uint32_t tx_bandwidth;
-uint32_t rx_datarate;
-uint32_t tx_datarate;
-uint8_t rx_coderate;
-uint8_t tx_coderate;
-uint16_t rx_preamble_len;
-uint16_t tx_preamble_len;
-bool rx_fix_len;
-bool tx_fix_len;
-bool rx_crc_on;
-bool tx_crc_on;
-bool rx_freq_hop_on;
-bool tx_freq_hop_on;
-bool rx_iq_inverted;
-bool tx_iq_inverted;
-uint32_t rx_bandwidth_afc;
-uint16_t rx_symb_timeout;
-uint8_t rx_payload_len;
-uint8_t rx_hop_period;
-bool rx_rx_continuous;
-int8_t tx_power;
-uint8_t tx_hop_period;
-uint32_t tx_timeout_val;
-uint32_t tx_fdev;
+static radio_modems_t modem;
+static uint32_t rx_bandwidth;
+static uint32_t tx_bandwidth;
+static uint32_t rx_datarate;
+static uint32_t tx_datarate;
+static uint8_t rx_coderate;
+static uint8_t tx_coderate;
+static uint16_t rx_preamble_len;
+static uint16_t tx_preamble_len;
+static bool rx_fix_len;
+static bool tx_fix_len;
+static bool rx_crc_on;
+static bool tx_crc_on;
+static bool rx_freq_hop_on;
+static bool tx_freq_hop_on;
+static bool rx_iq_inverted;
+static bool tx_iq_inverted;
+static uint32_t rx_bandwidth_afc;
+static uint16_t rx_symb_timeout;
+static uint8_t rx_payload_len;
+static uint8_t rx_hop_period;
+static bool rx_rx_continuous;
+static int8_t tx_power;
+static uint8_t tx_hop_period;
+static uint32_t tx_timeout_val;
+static uint32_t tx_fdev;
 
 void set_rx_settings_lora(uint32_t bandwidth, uint32_t datarate, uint8_t coderate, uint32_t bandwidth_afc, uint16_t preamble_len, uint16_t symb_timeout, bool fix_len, uint8_t payload_len, bool crc_on, bool freq_hop_on, uint8_t hop_period, bool iq_inverted, bool rx_continuous);
 void set_tx_settings_lora(int8_t power, uint32_t fdev, uint32_t bandwidth, uint32_t datarate, uint8_t coderate, uint16_t preamble_len, bool fix_len, bool crc_on, bool freq_hop_on, uint8_t hop_period, bool iq_inverted, uint32_t timeout);
@@ -195,26 +233,26 @@ void set_rx_settings_fsk(uint32_t bandwidth, uint32_t datarate, uint8_t coderate
 void set_tx_settings_fsk(int8_t power, uint32_t fdev, uint32_t bandwidth, uint32_t datarate, uint8_t coderate, uint16_t preamble_len, bool fix_len, bool crc_on, bool freq_hop_on, uint8_t hop_period, bool iq_inverted, uint32_t timeout);
 void set_radio_configuration_default(bool lora_or_fsk);
 
-uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint32_t size, uint8_t *data_input);
+uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint32_t size);
 uint8_t send_battery_status(uint8_t battery_enable, uint8_t battery_status);
-uint8_t send_data(uint8_t battery_enable, uint8_t battery_status, uint32_t size,  uint8_t *data_input);
+uint8_t send_data(uint8_t battery_enable, uint8_t battery_status, uint32_t size);
 void calibrate_radio();
-uint8_t ch_request_data(uint8_t timeout_seconds, uint8_t *data_output);
-uint8_t tc_transmit_data(uint8_t transmit_interval, uint32_t size, uint8_t *data_input);
-uint8_t ch_recevie_data(uint16_t device_id, uint16_t data_size, uint8_t *data_output);
+uint8_t ch_request_data(uint8_t timeout_seconds);
+uint8_t tc_transmit_data(uint8_t transmit_interval);
+uint8_t ch_recevie_data(uint16_t device_id, uint16_t data_size);
 
 uint8_t send_battery_status(uint8_t battery_enable, uint8_t battery_status){
-  return send_request_packet(battery_enable, battery_status, 0, NULL);
+  return send_request_packet(battery_enable, battery_status, 0);
 }
-uint8_t send_data(uint8_t battery_enable, uint8_t battery_status, uint32_t size, uint8_t *data_input){
-  return send_request_packet(battery_enable, battery_status, size, data_input);
+uint8_t send_data(uint8_t battery_enable, uint8_t battery_status, uint32_t size){
+  return send_request_packet(battery_enable, battery_status, size);
 }
 void calibrate_radio(){
   // Calibration process.
   printf("calibrate_radio()\r\n");
 }
 
-uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint32_t size, uint8_t *data_input){
+uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint32_t size){
   uint8_t send_request_status = 0x0;
   bool exit = false;
 
@@ -258,6 +296,9 @@ uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint
         break;
       }
       case LISTEN_ON_CHANNEL:{
+        // Set buffer size in radio.
+        radio.set_max_payload_length(modem, DATA_PACKET_SIZE);
+
         radio.set_rx_timeout_us(5000000);
         // Potentially receive a packet over the radio
         radio.receive();
@@ -288,6 +329,8 @@ uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint
         break;
       }
       case SEND_PACKET:{
+        // Set buffer size in radio.
+        radio.set_max_payload_length(modem, REQUEST_PACKET_SIZE);
         // Send packet over the radio.
         radio.send(tc_request_tx_packet, REQUEST_PACKET_SIZE);
         // Wait for radio response.
@@ -319,6 +362,9 @@ uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint
         break;
       }
       case RECEIVE_PACKET:{
+        // Set buffer size in radio.
+        radio.set_max_payload_length(modem, REQUEST_GRANT_PACKET_SIZE);
+
         radio.set_rx_timeout_us(2000000);
         // Receive packet over the radio
         radio.receive();
@@ -340,7 +386,7 @@ uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint
             if(battery_enable == 0){
               uint8_t transmit_interval = tc_request_grant_rx_packet[3];
 
-              send_request_status = tc_transmit_data(transmit_interval, size, data_input);
+              send_request_status = tc_transmit_data(transmit_interval);
               exit = true;
               // Reset State
               tc_request_state = INIT;
@@ -394,7 +440,7 @@ uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint
   }
   return send_request_status;
 }
-uint8_t ch_request_data(uint8_t timeout_seconds, uint8_t *data_output){
+uint8_t ch_request_data(uint8_t timeout_seconds){
 
   uint8_t send_request_grant_status = 0x0;
   bool exit = false;
@@ -418,6 +464,9 @@ uint8_t ch_request_data(uint8_t timeout_seconds, uint8_t *data_output){
       case INIT:{
         // Set default radio configuration.
         set_radio_configuration_default(true);
+
+        // Set buffer size in radio.
+        radio.set_max_payload_length(modem, REQUEST_PACKET_SIZE);
 
         radio.set_rx_timeout_us(11000000);
 
@@ -448,11 +497,13 @@ uint8_t ch_request_data(uint8_t timeout_seconds, uint8_t *data_output){
           // Set the interval (number of packets) for data transmission.
           if(tc_battery_enable == 0){
             if(data_size == VGA_DATA_SIZE){
-              ch_request_grant_tx_packet[3] = 10;
+              ch_request_grant_tx_packet[3] = 100;
             }else if(data_size == QVGA_DATA_SIZE){
-              ch_request_grant_tx_packet[3] = 10;
+              ch_request_grant_tx_packet[3] = 100;
             }else if(data_size == QQVGA_DATA_SIZE){
-              ch_request_grant_tx_packet[3] = 10;
+              ch_request_grant_tx_packet[3] = 100;
+            }else{
+              ch_request_grant_tx_packet[3] = 100;
             }
           }
           printf("Received Battery Status from device %d and has value of %d \r\n", tc_id, tc_battery_status);
@@ -479,6 +530,8 @@ uint8_t ch_request_data(uint8_t timeout_seconds, uint8_t *data_output){
       case SEND_PACKET:{
         // Delay so the trail camera has enough time to go into receiver mode.
         wait_us(1000000);
+        // Set buffer size in radio.
+        radio.set_max_payload_length(modem, REQUEST_GRANT_PACKET_SIZE);
         // Send packet over the radio.
         radio.send(ch_request_grant_tx_packet, REQUEST_GRANT_PACKET_SIZE);
         // Wait for radio response.
@@ -491,10 +544,11 @@ uint8_t ch_request_data(uint8_t timeout_seconds, uint8_t *data_output){
           radioFlags.txDone = false;
           if(tc_battery_enable == 0){
             // Start receiving data from the trail camera.
-            rx_data_status = ch_recevie_data(tc_id, data_size, data_output);
+            send_request_grant_status = ch_recevie_data(tc_id, data_size);
+          }else{
+            // Exit with success.
+            send_request_grant_status = REQUEST_GRANT_SUCCESS;
           }
-          // Exit with success.
-          send_request_grant_status = REQUEST_GRANT_SUCCESS;
           exit = true;
           // Reset State
           ch_request_state = INIT;
@@ -518,15 +572,12 @@ uint8_t ch_request_data(uint8_t timeout_seconds, uint8_t *data_output){
   }
   return send_request_grant_status;
 }
-uint8_t tc_transmit_data(uint8_t transmit_interval, uint32_t size, uint8_t *data_input){
+uint8_t tc_transmit_data(uint8_t transmit_interval){
+  byte_counter = 0;
   printf("tc_transmit_data \r\n");
 
-  uint32_t bytes_left = size;
   uint8_t interval_counter = 0;
-  uint32_t index = 0;
-  bool exit = false;
   bool send_data_complete = false;
-
   uint8_t retry_counter = 0;
   uint16_t tc_id = 0;
   tc_data_state = SEND_PACKET;
@@ -535,59 +586,37 @@ uint8_t tc_transmit_data(uint8_t transmit_interval, uint32_t size, uint8_t *data
     switch(tc_data_state){
       case SEND_PACKET:{
           if(interval_counter++ < transmit_interval){
-            // ******* SEND PACKET *******
-
             // Set buffer size in radio.
             radio.set_max_payload_length(modem, DATA_PACKET_SIZE);
             // Send Device ID:
             tc_data_tx_packet[0] = (radio_id >> 8);
             tc_data_tx_packet[1] = (radio_id & 0x00FF);
-
-            // Copy over elements from data_input into transmit buffer:
-            if((index + DATA_PACKET_SIZE-2) < size){
-              for(uint8_t i = 0; i < DATA_PACKET_SIZE-3; i++){
-                tc_data_tx_packet[i+3] = data_input[index + i];
-              }
-              // Valid packet.
-              tc_data_tx_packet[2] = 0;
-            }else if(index >= size){
-              send_data_complete = true;
-              // Set unused values to 0xFF
-              for(uint8_t i = 0; i < DATA_PACKET_SIZE-3; i++){
-                tc_data_tx_packet[i+3] = 0xFF;
-              }
-              // Invalid packet.
-              tc_data_tx_packet[2] = 1;
+            // Put data in packet.
+            tc_get_data_from_device(DATA_PACKET_SIZE-3);
+            // Assign full bit.
+            if(tc_tx_data_buffer_size == DATA_PACKET_SIZE-3){
+              tc_data_tx_packet[2] = tc_tx_data_buffer_size;
             }else{
-              send_data_complete = true;
-              // Have packet full of data.
-              for(uint8_t i = 0; i < (index - size); i++){
-                tc_data_tx_packet[i+3] = data_input[index + i];
-              }
-              // Set unused values to 0xFF
-              for(uint8_t i = (index - size); i < DATA_PACKET_SIZE-3; i++){
+              tc_data_tx_packet[2] = tc_tx_data_buffer_size;
+              // Send 0xFF for non-values.
+              for(int i = tc_tx_data_buffer_size; i < DATA_PACKET_SIZE-3; i++){
                 tc_data_tx_packet[i+3] = 0xFF;
               }
-              // Valid packet.
-              tc_data_tx_packet[2] = 2;
+              // There is no more data to send.
+              send_data_complete = true;
             }
-            index += DATA_PACKET_SIZE-3;
-            bytes_left -= DATA_PACKET_SIZE-3;
-
             // Send packet over the radio.
-            radio.send(tc_data_tx_packet, REQUEST_PACKET_SIZE);
+            radio.send(tc_data_tx_packet, DATA_PACKET_SIZE);
             // Wait for radio response.
             tc_data_state = WAIT_SEND_DONE;
           }else{
-            // ******* READ PACKET *******
             // Listen for acknowledgement packet.
             tc_data_state = RECEIVE_PACKET;
           }
         break;
       }
       case RECEIVE_PACKET:{
-        //
-        radio.set_rx_timeout_us(1000000);
+        radio.set_rx_timeout_us(TC_DATA_ACK_TIMEOUT_US);
         // Set buffer size in radio.
         radio.set_max_payload_length(modem, DATA_ACK_PACKET_SIZE);
         // Receive packet over the radio
@@ -601,22 +630,18 @@ uint8_t tc_transmit_data(uint8_t transmit_interval, uint32_t size, uint8_t *data
           // Reset flag.
           radioFlags.rxDone = false;
           // Process received packet.
-
           tc_id = (tc_data_ack_rx_packet[0] << 8) | tc_data_ack_rx_packet[1];
           if(tc_id != radio_id){
             return DATA_RX_ERROR_4;
           }
-
           switch(tc_data_ack_rx_packet[2]){
             // Resend burst.
             case DATA_ACK_TIMEOUT:{}
             case DATA_ACK_ERROR:{
-              // Reset counters.
               if(retry_counter++ < DATA_RETRY_MAX){
+                // Reset the data.
+                tc_get_previous_data_from_device((DATA_PACKET_SIZE-3)*interval_counter);
                 interval_counter = 0;
-                index -= DATA_PACKET_SIZE-3;
-                bytes_left += DATA_PACKET_SIZE-3;
-                tc_data_state = SEND_PACKET;
               }else{
                 return DATA_RX_ERROR_5;
               }
@@ -655,8 +680,8 @@ uint8_t tc_transmit_data(uint8_t transmit_interval, uint32_t size, uint8_t *data
           radioFlags.txDone = false;
           // Send Again
           tc_data_state = SEND_PACKET;
-          // Add in a delay for the centralhub to process data.
-          wait_us(1000);
+          // Add in a delay for the centralhub to process data/print to screen/save to sd card.
+          wait_us(WAIT_FOR_CH_TO_PROCESS_DATA_US);
         }
         else if(radioFlags.txTimeout){
           // Reset flag.
@@ -672,37 +697,25 @@ uint8_t tc_transmit_data(uint8_t transmit_interval, uint32_t size, uint8_t *data
   }
   return DATA_SUCCESS;
 }
-uint8_t ch_recevie_data(uint16_t device_id, uint16_t data_size, uint8_t *data_output){
-  printf("tc_transmit_data \r\n");
+uint8_t ch_recevie_data(uint16_t device_id, uint16_t data_size){
+  printf("ch_recevie_data \r\n");
 
-  uint32_t bytes_left = data_size;
   uint8_t interval_counter = 0;
-  uint32_t index = 0;
-  bool exit = false;
   bool receive_data_complete = false;
-
   uint8_t retry_counter = 0;
-  ch_rx_data_size = data_size;
-  ch_data_state = RECEIVE_PACKET;
   uint16_t tc_id = 0;
+  ch_data_state = RECEIVE_PACKET;
   uint8_t data_ack_status = 0;
-
-
-  if(data_size == 1){
-    ch_rx_data_size = VGA_DATA_SIZE;
-  }else if(data_size == 2){
-    ch_rx_data_size = QVGA_DATA_SIZE;
-  }else if(data_size == 3){
-    ch_rx_data_size = QQVGA_DATA_SIZE;
-  }
 
   uint8_t transmit_interval = 0;
   if(data_size == VGA_DATA_SIZE){
-    transmit_interval = 10;
+    transmit_interval = 100;
   }else if(data_size == QVGA_DATA_SIZE){
-    transmit_interval = 10;
+    transmit_interval = 100;
   }else if(data_size == QQVGA_DATA_SIZE){
-    transmit_interval = 10;
+    transmit_interval = 100;
+  }else{
+    transmit_interval = 100;
   }
 
   while(1){
@@ -725,7 +738,7 @@ uint8_t ch_recevie_data(uint16_t device_id, uint16_t data_size, uint8_t *data_ou
       }
       case RECEIVE_PACKET:{
         //
-        radio.set_rx_timeout_us(1000000);
+        radio.set_rx_timeout_us(CH_DATA_TIMEOUT_US);
         // Set buffer size in radio.
         radio.set_max_payload_length(modem, DATA_PACKET_SIZE);
         // Receive packet over the radio
@@ -744,29 +757,12 @@ uint8_t ch_recevie_data(uint16_t device_id, uint16_t data_size, uint8_t *data_ou
           if(tc_id != device_id){
             return DATA_RX_ERROR_4;
           }
-
-          switch(ch_data_rx_packet[2]){
-            // Resend burst.
-            case DATA_FULL:{
-              for(uint8_t i = 3; i < DATA_PACKET_SIZE; i++){
-                data_output[index++] = ch_data_rx_packet[i];
-              }
-              break;
-            }
-            case DATA_HALF_FULL:{
-              // Reset counters.
-              for(uint8_t i = 3; i < (ch_rx_data_size - DATA_PACKET_SIZE) + 3; i++){
-                data_output[index++] = ch_data_rx_packet[i];
-              }
-              receive_data_complete = true;
-              break;
-            }
-            case DATA_EMPTY:{
-              receive_data_complete = true;
-              break;
-            }
+          // Do whatever with the data.
+          ch_print_data_to_cpu(ch_data_rx_packet[2]);
+          if(ch_data_rx_packet[2] != DATA_PACKET_SIZE-3){
+            receive_data_complete = true;
           }
-          if(interval_counter++ == transmit_interval){
+          if(++interval_counter == transmit_interval){
             // Send success ack
             data_ack_status = DATA_STATUS_SUCCESS;
             interval_counter = 0;
@@ -783,7 +779,6 @@ uint8_t ch_recevie_data(uint16_t device_id, uint16_t data_size, uint8_t *data_ou
           if(retry_counter++ < DATA_RETRY_MAX){
             data_ack_status = DATA_STATUS_TIMEOUT_ERROR;
             interval_counter = 0;
-            // index = index - (interval_counter*(DATA_PACKET_SIZE-3));
             ch_data_state = SEND_PACKET;
           }else{
             return DATA_RX_FAILED_TIMEOUT;
@@ -816,7 +811,6 @@ uint8_t ch_recevie_data(uint16_t device_id, uint16_t data_size, uint8_t *data_ou
   }
   return DATA_SUCCESS;
 }
-
 
 void On_tx_done(void){
   printf("tx_done. \r\n");
@@ -857,6 +851,9 @@ void On_rx_done(const uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
       for(uint8_t i = 0; i < DATA_ACK_PACKET_SIZE; i++){
         tc_data_ack_rx_packet[i] = payload[i];
       }
+      // Save the rssi and the snr in case it is needed later.
+      tc_data_ack_rx_rssi = rssi;
+      tc_data_ack_rx_snr = snr;
       break;
     }
   }
@@ -866,6 +863,9 @@ void On_rx_done(const uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
       for(uint8_t i = 0; i < DATA_PACKET_SIZE; i++){
         ch_data_rx_packet[i] = payload[i];
       }
+      // Save the rssi and the snr in case it is needed later.
+      ch_data_rx_rssi = rssi;
+      ch_data_rx_snr = snr;
       break;
     }
   }
@@ -1020,7 +1020,7 @@ int main(void){
       case 'd':
         led2 = 1;
         if(is_trail_camera){
-          uint8_t result2 = send_data(0, 0, QQVGA_DATA_SIZE, frame_qqvga);
+          uint8_t result2 = send_data(0, 0, QQVGA_DATA_SIZE);
           printf("send_data result: %d \r\n", result2);
         }
         led2 = 0;
@@ -1029,7 +1029,7 @@ int main(void){
       case 'c':
         led2 = 1;
         if(!is_trail_camera){
-          uint8_t result2 = ch_request_data(15, ch_rx_data);
+          uint8_t result2 = ch_request_data(15);
           printf("ch_request_data result: %d \r\n", result2);
         }
         led2 = 0;
@@ -1038,6 +1038,28 @@ int main(void){
       case 's':
         led3 = 1;
         is_trail_camera = !is_trail_camera;
+        ThisThread::sleep_for(1000);
+        led3 = 0;
+        break;
+
+      case 'n':
+        led3 = 1;
+        serial_port.read(inputBuffer, 1);
+        switch (inputBuffer[0]){
+          // Continuous receive for 15 seconds.
+          case 'v':
+            number_of_bytes_to_send = VGA_DATA_SIZE;
+            break;
+          case 'b':
+            number_of_bytes_to_send = QVGA_DATA_SIZE;
+            break;
+          case 'n':
+            number_of_bytes_to_send = QQVGA_DATA_SIZE;
+            break;
+          case 'm':
+            number_of_bytes_to_send = 900;
+            break;
+        }
         ThisThread::sleep_for(1000);
         led3 = 0;
         break;
