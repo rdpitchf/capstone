@@ -14,10 +14,10 @@ FileHandle *mbed::mbed_override_console(int fd){
     return &serial_port;
 }
 
-static PinName mosi(SPI_MOSI);
-static PinName miso(SPI_MISO);
-static PinName sclk(SPI_SCK);
-static PinName nss(SPI_CS);
+static PinName mosi(D11);
+static PinName miso(D12);
+static PinName sclk(D13);
+static PinName nss(D10);
 static PinName reset(PG_0);
 static PinName dio1(PG_1);
 static PinName busy(PF_9);
@@ -109,10 +109,11 @@ static uint16_t radio_id = 0x10AF;
 #define DATA_SUCCESS 0x16
 
 
-#define TC_DATA_ACK_TIMEOUT_US 75000
-#define CH_DATA_TIMEOUT_US 75000
+#define TC_DATA_ACK_TIMEOUT_US 750000
+#define CH_DATA_TIMEOUT_US 750000
 #define WAIT_FOR_CH_TO_PROCESS_DATA_US 100000
 #define CH_WAIT_ON_PRINTS_US 100000
+#define TC_WAIT_FROM_TX_TO_RX 100000
 
 // DATA_STATUS_SUCCESS
 // data_ack_status = DATA_STATUS_TIMEOUT_ERROR;
@@ -158,7 +159,7 @@ void ch_print_data_to_cpu(uint8_t size_of_data);
 void tc_get_previous_data_from_device(uint8_t number_of_bytes_reset);
 
 uint32_t byte_counter = 0;
-uint32_t number_of_bytes_to_send = 600;
+uint32_t number_of_bytes_to_send = QQVGA_DATA_SIZE;
 void tc_get_data_from_device(uint8_t max_size){
 
   // Do a full packet.
@@ -386,10 +387,11 @@ uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint
             if(battery_enable == 0){
               uint8_t transmit_interval = tc_request_grant_rx_packet[3];
 
-              send_request_status = tc_transmit_data(transmit_interval);
+
               exit = true;
               // Reset State
               tc_request_state = INIT;
+              send_request_status = tc_transmit_data(transmit_interval);
 
             }else{
               send_request_status = REQUEST_SUCCESS;
@@ -497,13 +499,13 @@ uint8_t ch_request_data(uint8_t timeout_seconds){
           // Set the interval (number of packets) for data transmission.
           if(tc_battery_enable == 0){
             if(data_size == VGA_DATA_SIZE){
-              ch_request_grant_tx_packet[3] = 100;
+              ch_request_grant_tx_packet[3] = 10;
             }else if(data_size == QVGA_DATA_SIZE){
-              ch_request_grant_tx_packet[3] = 100;
+              ch_request_grant_tx_packet[3] = 10;
             }else if(data_size == QQVGA_DATA_SIZE){
-              ch_request_grant_tx_packet[3] = 100;
+              ch_request_grant_tx_packet[3] = 10;
             }else{
-              ch_request_grant_tx_packet[3] = 100;
+              ch_request_grant_tx_packet[3] = 10;
             }
           }
           printf("Received Battery Status from device %d and has value of %d \r\n", tc_id, tc_battery_status);
@@ -642,6 +644,7 @@ uint8_t tc_transmit_data(uint8_t transmit_interval){
                 // Reset the data.
                 tc_get_previous_data_from_device((DATA_PACKET_SIZE-3)*interval_counter);
                 interval_counter = 0;
+                tc_data_state = SEND_PACKET;
               }else{
                 return DATA_RX_ERROR_5;
               }
@@ -709,13 +712,13 @@ uint8_t ch_recevie_data(uint16_t device_id, uint16_t data_size){
 
   uint8_t transmit_interval = 0;
   if(data_size == VGA_DATA_SIZE){
-    transmit_interval = 100;
+    transmit_interval = 10;
   }else if(data_size == QVGA_DATA_SIZE){
-    transmit_interval = 100;
+    transmit_interval = 10;
   }else if(data_size == QQVGA_DATA_SIZE){
-    transmit_interval = 100;
+    transmit_interval = 10;
   }else{
-    transmit_interval = 100;
+    transmit_interval = 10;
   }
 
   while(1){
@@ -766,6 +769,8 @@ uint8_t ch_recevie_data(uint16_t device_id, uint16_t data_size){
             // Send success ack
             data_ack_status = DATA_STATUS_SUCCESS;
             interval_counter = 0;
+            // Wait for Trail Camera to go from TX to RX mode.
+            wait_us(TC_WAIT_FROM_TX_TO_RX);
             ch_data_state = SEND_PACKET;
           }else{
             // Recieve next packet.
@@ -869,9 +874,6 @@ void On_rx_done(const uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
       break;
     }
   }
-
-
-
 }
 void On_tx_timeout(void){
   printf("tx_timeout. \r\n");
@@ -1021,7 +1023,7 @@ int main(void){
         led2 = 1;
         if(is_trail_camera){
           uint8_t result2 = send_data(0, 0, QQVGA_DATA_SIZE);
-          printf("send_data result: %d \r\n", result2);
+          printf("send_data result: %X \r\n", result2);
         }
         led2 = 0;
         break;
@@ -1030,7 +1032,7 @@ int main(void){
         led2 = 1;
         if(!is_trail_camera){
           uint8_t result2 = ch_request_data(15);
-          printf("ch_request_data result: %d \r\n", result2);
+          printf("ch_request_data result: %X \r\n", result2);
         }
         led2 = 0;
         break;
