@@ -5,6 +5,25 @@ Programming code related to Engineering 4th Year Design Capstone Project. Using 
 - main_book_guide_converted was the converting the book Arduino code into mbed and to compile.
 - main_modified_guide was a working version setting registers according to the book.
 - main_original was the first attempt in creating all files.
+- main_working_qqvga_and_qvga is the first complete working version that can take a qqvga and a qvga picture
+
+## main_working_qqvga_and_qvga 
+### How to use:
+- Connect Board to MCU with the appropriate pin connections.
+- Select the resolution type in int main()
+- Build/compile program and flash to MCU.
+- Run python script. Make sure LINES and PIXELS are set to the correct dimensions depending on what you made the resolution.
+- QQVGA and QVGA must be saved as a .yuv file.
+- In order to convert .yuv to .png, you must download and install a program called ffmpeg.
+### How to install ffmpeg:
+- Go to https://www.ffmpeg.org/download.html and copy the command 'git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg'
+- Add repository somewhere on your computer (like desktop).
+#### QQVGA .YUV to .PNG command line:
+- ffmpeg -f rawvideo -s 160x120 -pix_fmt yuyv422 -i INPUTFILE.YUV -f image2 -vcodec png outputdir\OUTPUTFILE.PNG
+#### QVGA .YUV to .PNG command line:
+- ffmpeg -f rawvideo -s 320x240 -pix_fmt yuyv422 -i INPUTFILE.YUV -f image2 -vcodec png outputdir\OUTPUTFILE.PNG
+#### VGA .RAW to .PNG command line:
+- ffmpeg -f rawvideo -s 640x480 -pix_fmt bayer_bggr8 -i INPUTFILE.RAW -f image2 -vcodec png outputdir\OUTPUTFILE.PNG
 
 ## main_modified_guide 
 ### Possible Issues:
