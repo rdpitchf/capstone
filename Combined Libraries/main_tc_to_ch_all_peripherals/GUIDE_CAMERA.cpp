@@ -50,9 +50,11 @@ class Camera{
     int sd_card_counter = 0;
 
 
-    Camera():wrst(PD_15), rrst(PF_12), wen(PE_4), vsync(PE_5), rclk(PE_2),
+    Camera(bool night_mode):wrst(PD_15), rrst(PF_12), wen(PE_4), vsync(PE_5), rclk(PE_2),
     d0(PD_9),d1(PD_8),d2(PF_15),d3(PE_13),d4(PF_14),d5(PE_11),d6(PE_9),d7(PF_13){
-
+      if(night_mode){
+        set_to_night_mode();
+      }
       printf("---------- Camera Registers ----------\r\n");
       this->ResetCameraRegisters();
       printf("---------- ResetCameraRegisters Completed ----------\r\n");
@@ -72,6 +74,9 @@ class Camera{
       printf("RESETTING ALL REGISTERS BY SETTING COM7 REGISTER to 0x80: %X \r\n", data);
       // Delay at least 500ms
       ThisThread::sleep_for(500ms);
+    }
+    void set_to_night_mode(){
+      FPSParam = "NightMode";
     }
     void ReadRegisters(){
       uint8_t data = 0;
@@ -192,9 +197,13 @@ class Camera{
     void SetupCameraNightMode(){
       printf("%s \r\n","... Turning NIGHT MODE ON ....");
 
-      i2c.write_until_true(CLKRC, CLKRC_VALUE_NIGHTMODE_AUTO);
+      // i2c.write_until_true(CLKRC, CLKRC_VALUE_NIGHTMODE_AUTO);
+      i2c.write_until_true(CLKRC, CLKRC_VALUE_NIGHTMODE_FIXED);
+
       printf("CLKRC Completed. \r\n");
-      i2c.write_until_true(COM11, COM11_VALUE_NIGHTMODE_AUTO);
+      // i2c.write_until_true(COM11, COM11_VALUE_NIGHTMODE_AUTO);
+      i2c.write_until_true(COM11, COM11_VALUE_NIGHTMODE_ON_EIGHTH);
+
       printf("COM11 Completed. \r\n");
     }
 

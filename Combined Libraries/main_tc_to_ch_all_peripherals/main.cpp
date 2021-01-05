@@ -12,6 +12,11 @@
 #include "SX1262_RADIO.cpp"
 #include "millis.h"
 #include "GPS.h"
+#include <stdio.h>
+
+#define FILE_OPEN_RETRY 10
+#define FILE_CLOSE_RETRY 10
+#define FILE_MOUNT_RETRY 10
 
 static BufferedSerial serial_port(USBTX, USBRX, 115200);
 static DigitalOut led1(LED1);
@@ -37,6 +42,7 @@ Picture_return_t take_a_picture(Micro_sd_card *sd_card, Camera *camera, std::str
 uint8_t send_picture(Micro_sd_card *sd_card, Sx_radio *sx_radio, std::string filename);
 void take_photo(Micro_sd_card *sd_card, Camera *camera, Sx_radio *sx_radio);
 void setup_gps(gps* myGPS, I2C* test);
+void save_position_time_date(Micro_sd_card *sd_card, std::string filename);
 
 // Entry point for the example
 int main() {
@@ -53,7 +59,7 @@ int main() {
       case 'd':{
         led2 = 1;
         if(is_trail_camera){
-          Camera camera;
+          Camera camera(false);
           take_photo(&sd_card, &camera, &sx_radio);
         }
         led2 = 0;
@@ -71,7 +77,15 @@ int main() {
         }
         break;
       }
-
+      case 'n':{
+        led3 = 1;
+        Camera camera(true);
+        camera.set_to_night_mode();
+        take_photo(&sd_card, &camera, &sx_radio);
+        ThisThread::sleep_for(1000);
+        led3 = 0;
+        break;
+      }
       case 's':{
         led3 = 1;
         is_trail_camera = !is_trail_camera;
@@ -94,7 +108,7 @@ int main() {
         break;
       }
 
-      case 'n':{
+      case 'q':{
         led3 = 1;
         serial_port.read(inputBuffer, 1);
         switch (inputBuffer[0]){
@@ -174,8 +188,18 @@ Picture_return_t take_a_picture(Micro_sd_card *sd_card, Camera *camera, std::str
     new_filename = filename_temp + ".yuv";
     name = &new_filename[0];
   }
+
   output.filename = new_filename;
-  if(sd_card->create_file(name)){
+
+  bool sd_created = false;
+  for(uint8_t i = 0; i < FILE_OPEN_RETRY; i++){
+    if(sd_card->create_file(name)){
+      sd_created = true;
+      break;
+    }
+  }
+
+  if(sd_created){
     camera->prepare_fifo_data();
     uint32_t buffer_size = camera->get_data(buffer, buffer_max_size);
     while(buffer_size == buffer_max_size){
@@ -184,7 +208,14 @@ Picture_return_t take_a_picture(Micro_sd_card *sd_card, Camera *camera, std::str
     }
     sd_card->write_data_to_file(buffer, buffer_size);
 
-    if(!sd_card->close_file()){
+    bool sd_close = false;
+    for(uint8_t i = 0; i < FILE_CLOSE_RETRY; i++){
+      if(sd_card->close_file()){
+        sd_close = true;
+        break;
+      }
+    }
+    if(!sd_close){
       output.status = 1;
       printf("Could not close the file. \r\n");
     }
@@ -197,42 +228,134 @@ Picture_return_t take_a_picture(Micro_sd_card *sd_card, Camera *camera, std::str
 
 uint8_t send_picture(Micro_sd_card *sd_card, Sx_radio *sx_radio, std::string filename){
   uint8_t result = 0;
-
-  if(sd_card->open_file(&filename[0])){
-    printf("send_data start. \r\n");
-    result = sx_radio->send_data(0, 0, QQVGA_DATA_SIZE);
-    printf("send_data end. \r\n");
-    if(!sd_card->close_file()){
-      result = 1;
-      printf("Could not close the file. \r\n");
-    }
-  }else{
-    printf("Could not open the file. \r\n");
-    result = 2;
+  result = sx_radio->send_data(0, 0, QQVGA_DATA_SIZE, filename);
+  if(!sd_card->close_file()){
+    result = 1;
+    printf("Could not close the file. \r\n");
   }
   return result;
 
+}
+void save_position_time_date(Micro_sd_card *sd_card, std::string filename){
+  gps myGPS;
+  I2C gpsi2c(PC_9,PC_0);
+  setup_gps(&myGPS, &gpsi2c);
+  position_time_date_t a = myGPS.position_time_date();
+  while(a.Year == 0 || a.Month == 0 || a.Day == 0 || a.tow == 0 || a.lat == 0 || a.lon == 0 || a.alt == 0){
+    a = myGPS.position_time_date();
+    wait_us(25000);
+  }
+  printf("GPS: Lat: %ld Long: %ld Alt: %ld tow: %lu Date: %ld %d %d, %d %d %d\r\n", a.lat, a.lon, a.alt, a.tow, a.Year, a.Month, a.Day, a.Hour, a.Minute, a.Second);
+
+  // Remove the .yuv from filename
+  // Add .txt to filename
+  std::string name_temp = filename + ".txt";
+  char * name = &name_temp[0];
+
+  bool sd_created = false;
+  for(uint8_t i = 0; i < FILE_OPEN_RETRY; i++){
+    if(sd_card->create_file(name)){
+      sd_created = true;
+      break;
+    }
+  }
+  if(sd_created){
+    // Write to sd card:
+    uint8_t sd_card_buffer[4]{0};
+    for(uint8_t i = 0; i < 4; i++){
+      sd_card_buffer[i] = (a.lat >> (8*i)) & 0xFF;
+    }
+    sd_card->write_data_to_file(sd_card_buffer, 4);
+    for(uint8_t i = 0; i < 4; i++){
+      sd_card_buffer[i] = (a.lon >> (8*i)) & 0xFF;
+    }
+    sd_card->write_data_to_file(sd_card_buffer, 4);
+    for(uint8_t i = 0; i < 4; i++){
+      sd_card_buffer[i] = (a.alt >> (8*i)) & 0xFF;
+    }
+    sd_card->write_data_to_file(sd_card_buffer, 4);
+    for(uint8_t i = 0; i < 4; i++){
+      sd_card_buffer[i] = (a.tow >> (8*i)) & 0xFF;
+    }
+    sd_card->write_data_to_file(sd_card_buffer, 4);
+    for(uint8_t i = 0; i < 2; i++){
+      sd_card_buffer[i] = (a.Year >> (8*i)) & 0xFF;
+    }
+    sd_card->write_data_to_file(sd_card_buffer, 2);
+    sd_card_buffer[0] = a.Month;
+    sd_card->write_data_to_file(sd_card_buffer, 1);
+    sd_card_buffer[0] = a.Day;
+    sd_card->write_data_to_file(sd_card_buffer, 1);
+    sd_card_buffer[0] = a.Hour;
+    sd_card->write_data_to_file(sd_card_buffer, 1);
+    sd_card_buffer[0] = a.Minute;
+    sd_card->write_data_to_file(sd_card_buffer, 1);
+    sd_card_buffer[0] = a.Second;
+    sd_card->write_data_to_file(sd_card_buffer, 1);
+
+    bool sd_close = false;
+    for(uint8_t i = 0; i < FILE_CLOSE_RETRY; i++){
+      if(sd_card->close_file()){
+        sd_close = true;
+        break;
+      }
+    }
+    if(!sd_close){
+      printf("Could not close the gps file. \r\n");
+    }
+  }else{
+    printf("Could not create the gps file. \r\n");
+  }
 }
 void take_photo(Micro_sd_card *sd_card, Camera *camera, Sx_radio *sx_radio){
 
 
   camera->SetupOV7670ForQQVGAYUV();
 
-  if(!sd_card->mount_sd_card()){
-    printf("Setup Failed. \r\n");
+  bool sd_mount = false;
+  for(uint8_t i = 0; i < FILE_MOUNT_RETRY; i++){
+    if(sd_card->mount_sd_card()){
+      sd_mount = true;
+      break;
+    }
   }
+  if(!sd_mount){
+    printf("Setup Failed. \r\n");
+  }else{
+    std::string filename = "/fs/testing_file";
+    Picture_return_t results = take_a_picture(sd_card, camera, filename, original_buffer, BUFFER_MAX_SIZE);
+    printf("Capture Status %d. \r\n", results.status);
 
-  std::string filename = "/fs/testing_file";
-  Picture_return_t results = take_a_picture(sd_card, camera, filename, original_buffer, BUFFER_MAX_SIZE);
-  printf("Capture Status %d. \r\n", results.status);
+    size_t lastindex = results.filename.find_last_of(".");
+    std::string name = results.filename.substr(0, lastindex);
 
-  uint8_t result = send_picture(sd_card, sx_radio, results.filename.c_str());
-  printf(results.filename.c_str());
-  printf("\r\n");
-  printf("Transmit Status %d. \r\n",result);
+    save_position_time_date(sd_card, name);
 
+    uint8_t result = send_picture(sd_card, sx_radio, name);
+    printf("%s",name);
+    printf("\r\n");
+    printf("Transmit Status %d. \r\n",result);
 
-  if(!sd_card->unmount_sd_card()){
-    printf("File unmount failed. \r\n");
+    if(result == 22){
+      std::string name_txt = name + ".txt";
+      if(!sd_card->delete_file(name_txt)){
+        printf("Could not delete: %s.txt\r\n", name_txt);
+      }
+      std::string name_yuv = name + ".yuv";
+      if(!sd_card->delete_file(name_yuv)){
+        printf("Could not delete: %s.yuv\r\n", name_yuv);
+      }
+    }
+
+    sd_mount = false;
+    for(uint8_t i = 0; i < FILE_MOUNT_RETRY; i++){
+      if(sd_card->unmount_sd_card()){
+        sd_mount = true;
+        break;
+      }
+    }
+    if(!sd_mount){
+      printf("File unmount failed. \r\n");
+    }
   }
 }

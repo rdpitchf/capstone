@@ -107,5 +107,13 @@ class Micro_sd_card{
         return false;
       }
     }
+    bool delete_file(std::string filename){
+      char * f_name = &filename[0];
+      if(remove(f_name) != 0 ){
+        return false;
+      }else{
+        return true;
+      }
+    }
 
 };

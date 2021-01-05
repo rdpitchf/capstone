@@ -5,8 +5,11 @@
 #include "SD_CARD.cpp"
 #endif
 
+#define FILE_OPEN_RETRY 10
+
 // Define packet sizes.
-#define REQUEST_PACKET_SIZE 5
+#define POSITION_TIME_DATE_SIZE 23
+#define REQUEST_PACKET_SIZE 5 + POSITION_TIME_DATE_SIZE
 #define REQUEST_GRANT_PACKET_SIZE 4
 #define DATA_PACKET_SIZE 255
 #define DATA_ACK_PACKET_SIZE 3
@@ -16,6 +19,7 @@
 #define QQVGA_DATA_SIZE 160*120*2
 // Radio identification number. (uint16_t)
 static uint16_t radio_id = 0x10AF;
+static uint16_t central_hub_id = 0x1234;
 // Retry limits:
 #define REQUEST_TX_RETRY_MAX 3
 #define REQUEST_RX_RETRY_MAX 3
@@ -40,6 +44,11 @@ static uint16_t radio_id = 0x10AF;
 #define DATA_RX_ERROR_3 0x0C
 #define DATA_RX_ERROR_4 0x0D
 #define DATA_RX_ERROR_5 0x0E
+
+#define SD_CARD_ERROR_1 0x20
+#define SD_CARD_ERROR_2 0x21
+#define SD_CARD_ERROR_3 0x22
+
 
 #define DATA_STATUS_SUCCESS 0x15
 #define DATA_STATUS_TIMEOUT_ERROR 0x13
@@ -231,17 +240,17 @@ class Sx_radio{
     }
 
     uint8_t send_battery_status(uint8_t battery_enable, uint8_t battery_status){
-      return send_request_packet(battery_enable, battery_status, 0);
+      return send_request_packet(battery_enable, battery_status, 0, "TODO");
     }
-    uint8_t send_data(uint8_t battery_enable, uint8_t battery_status, uint32_t size){
-      return send_request_packet(battery_enable, battery_status, size);
+    uint8_t send_data(uint8_t battery_enable, uint8_t battery_status, uint32_t size, std::string filename){
+      return send_request_packet(battery_enable, battery_status, size, filename);
     }
     void calibrate_radio(){
       // Calibration process.
       printf("calibrate_radio()\r\n");
     }
 
-    uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint32_t size){
+    uint8_t send_request_packet(uint8_t battery_enable, uint8_t battery_status, uint32_t size, std::string filename){
       uint8_t send_request_status = 0x0;
       bool exit = false;
 
@@ -280,6 +289,38 @@ class Sx_radio{
             }else{
               tc_request_tx_packet[4] = 0;
             }
+            // Open file and add in position, time and date:
+            std::string name = filename + ".txt";
+            if(sd_card->open_file(&name[0])){
+              uint8_t sd_position_time_date[POSITION_TIME_DATE_SIZE]{0};
+              sd_card->read_data_from_file(sd_position_time_date, POSITION_TIME_DATE_SIZE);
+              for(uint8_t i = 0; i < POSITION_TIME_DATE_SIZE; i++){
+                tc_request_tx_packet[i+5] = sd_position_time_date[i];
+              }
+              if(!sd_card->close_file()){
+                printf("Could not close the gps file. \r\n");
+                return SD_CARD_ERROR_1;
+              }
+            }else{
+              printf("Could not open the gps file. \r\n");
+              return SD_CARD_ERROR_2;
+            }
+            // After data has been extracted, open up .yuv file like in send_picture() in main.cpp
+            name = filename + ".yuv";
+
+            bool sd_open= false;
+            for(uint8_t i = 0; i < FILE_OPEN_RETRY; i++){
+              if(sd_card->open_file(&name[0])){
+                sd_open = true;
+                break;
+              }
+            }
+
+            if(!sd_open){
+              printf("Could not open the yuv file. \r\n");
+              return SD_CARD_ERROR_3;
+            }
+
             // Check the channel before transmitting.
             tc_request_state = LISTEN_ON_CHANNEL;
             break;
@@ -474,6 +515,39 @@ class Sx_radio{
               tc_battery_enable = ch_request_rx_packet[2];
               tc_battery_status = ch_request_rx_packet[3];
               data_size = ch_request_rx_packet[4];
+
+              printf("<<<< OUTPUT POSITION TIME DATE 23 Bytes >>>>\r\n");
+              uint8_t frame[4]{0};
+              for(uint8_t i = 0; i < REQUEST_PACKET_SIZE; i++){
+                frame[0] = ch_request_rx_packet[i];
+                serial_port->write(frame, 1);
+              }
+              // LoRa?
+              frame[0] = 1;
+              serial_port->write(frame, 1);
+              // Bandwidth:
+              for(uint8_t i = 0; i < 2; i++){
+                frame[i] = (tx_bandwidth >> (8*i)) & 0xFF;
+              }
+              serial_port->write(frame, 4);
+              // BPS
+              for(uint8_t i = 0; i < 2; i++){
+                frame[i] = (tx_datarate >> (8*i)) & 0xFF;
+              }
+              serial_port->write(frame, 4);
+              // Frequency deviation
+              for(uint8_t i = 0; i < 2; i++){
+                frame[i] = (tx_fdev >> (8*i)) & 0xFF;
+              }
+              serial_port->write(frame, 4);
+              // TX Power
+              frame[0] = tx_power;
+              serial_port->write(frame, 1);
+              // Central Hub ID
+              frame[0] = central_hub_id;
+              serial_port->write(frame, 1);
+
+              printf("<<<< OUTPUT POSITION TIME DATE STOP >>>>\r\n");
 
               // Set request grant packet to send.
               ch_request_grant_tx_packet[0] = tc_id >> 8;
